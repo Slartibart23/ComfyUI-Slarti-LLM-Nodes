@@ -2,11 +2,14 @@
 Shared llama-cpp-python backend for ComfyUI-LocalLLM-Nodes.
 
 Handles:
-  - Discovery of GGUF models in ComfyUI/models/LLM
   - Loading / caching of Llama instances (text-only and vision)
   - Resolution of the correct multimodal chat handler for the
     installed llama-cpp-python version
   - Conversion of ComfyUI IMAGE tensors to base64 data URIs
+  - Chat completion with context guard, think-block stripping and
+    automatic recovery from KV-cache exhaustion
+
+Model discovery, download and the models/LLM folder live in model_catalog.
 """
 
 import base64
@@ -16,70 +19,10 @@ import os
 
 import numpy as np
 
-try:
-    import folder_paths
-except ImportError:  # running outside ComfyUI (e.g. tests)
-    folder_paths = None
+from . import model_catalog
+from . import llama_bootstrap
 
-# ---------------------------------------------------------------------------
-# Model folder registration
-# ---------------------------------------------------------------------------
-
-LLM_FOLDER_NAME = "LLM"
-
-
-def _register_llm_folder():
-    """Register ComfyUI/models/LLM as a model folder (idempotent)."""
-    if folder_paths is None:
-        return
-    llm_dir = os.path.join(folder_paths.models_dir, LLM_FOLDER_NAME)
-    os.makedirs(llm_dir, exist_ok=True)
-    try:
-        folder_paths.add_model_folder_path(LLM_FOLDER_NAME, llm_dir)
-    except Exception:
-        # Older ComfyUI versions: fall back to manipulating the dict directly
-        if LLM_FOLDER_NAME not in folder_paths.folder_names_and_paths:
-            folder_paths.folder_names_and_paths[LLM_FOLDER_NAME] = (
-                [llm_dir],
-                {".gguf"},
-            )
-
-
-_register_llm_folder()
-
-
-def list_gguf_models():
-    """Return all main-model .gguf files (mmproj files are filtered out)."""
-    files = _list_all_gguf()
-    return [f for f in files if "mmproj" not in os.path.basename(f).lower()] or ["none"]
-
-
-def list_mmproj_files():
-    """Return all mmproj .gguf files, plus 'none'."""
-    files = _list_all_gguf()
-    return ["none"] + [f for f in files if "mmproj" in os.path.basename(f).lower()]
-
-
-def _list_all_gguf():
-    if folder_paths is None:
-        return []
-    try:
-        files = folder_paths.get_filename_list(LLM_FOLDER_NAME)
-    except Exception:
-        files = []
-    return [f for f in files if f.lower().endswith(".gguf")]
-
-
-def resolve_model_path(filename):
-    if folder_paths is None:
-        return filename
-    path = folder_paths.get_full_path(LLM_FOLDER_NAME, filename)
-    if path is None:
-        raise FileNotFoundError(
-            f"Model '{filename}' not found in ComfyUI/models/{LLM_FOLDER_NAME}. "
-            f"Place your .gguf files there and press 'R' to refresh."
-        )
-    return path
+model_catalog.register_llm_folder()
 
 
 # ---------------------------------------------------------------------------
@@ -96,14 +39,33 @@ _HANDLER_CANDIDATES = [
     "Llava15ChatHandler",
 ]
 
+# Which handler to try FIRST for a given model family (matched against the
+# lower-cased model file name). Mistral Small 3.x uses a Pixtral projector;
+# recent forks expose it through the generic Llava-style handlers.
+_HANDLER_HINTS = [
+    ("qwen3", ["Qwen3VLChatHandler"]),
+    ("qwen2.5", ["Qwen25VLChatHandler"]),
+    ("qwen2_5", ["Qwen25VLChatHandler"]),
+    ("minicpm", ["MiniCPMv26ChatHandler"]),
+    ("mistral", ["Llava16ChatHandler", "Llava15ChatHandler"]),
+    ("pixtral", ["Llava16ChatHandler", "Llava15ChatHandler"]),
+]
 
-def _resolve_chat_handler(mmproj_path, verbose=False):
+
+def _resolve_chat_handler(mmproj_path, model_path="", verbose=False):
     """Find a multimodal chat handler class supported by the installed
     llama-cpp-python and instantiate it with the given mmproj (clip) model."""
     from llama_cpp import llama_chat_format
 
+    candidates = list(_HANDLER_CANDIDATES)
+    name_l = os.path.basename(model_path).lower()
+    for needle, preferred in _HANDLER_HINTS:
+        if needle in name_l:
+            candidates = preferred + [c for c in candidates if c not in preferred]
+            break
+
     last_error = None
-    for name in _HANDLER_CANDIDATES:
+    for name in candidates:
         handler_cls = getattr(llama_chat_format, name, None)
         if handler_cls is None:
             continue
@@ -117,10 +79,10 @@ def _resolve_chat_handler(mmproj_path, verbose=False):
 
     raise RuntimeError(
         "No compatible multimodal chat handler found in your llama-cpp-python "
-        "installation. For Qwen3-VL / recent architectures you may need a "
-        "recent build, e.g.:\n"
-        '  CMAKE_ARGS="-DGGML_CUDA=on" pip install --no-cache-dir '
-        "git+https://github.com/JamePeng/llama-cpp-python.git\n"
+        "installation. Vision needs a recent build (JamePeng fork). Delete the "
+        "cached wheel in ComfyUI/models/LLM/.wheels, restart ComfyUI and run "
+        "the node again to fetch a newer build - or install one manually "
+        "(see README, Troubleshooting).\n"
         f"Last error: {last_error}"
     )
 
@@ -138,19 +100,18 @@ def _cache_key(model_path, mmproj_path, n_ctx, n_gpu_layers):
             int(n_ctx), int(n_gpu_layers))
 
 
-def get_llama(model_filename, mmproj_filename=None, n_ctx=8192,
+def get_llama(model_path, mmproj_path=None, n_ctx=8192,
               n_gpu_layers=-1, verbose=False):
-    """Load (or fetch from cache) a Llama instance.
+    """Load (or fetch from cache) a Llama instance from absolute paths.
 
-    mmproj_filename: 'none' or None for text-only, otherwise a vision
-    projector .gguf from the same model family.
+    mmproj_path: None for text-only, otherwise the vision projector .gguf
+    belonging to the same model family.
     """
+    llama_bootstrap.ensure_llama_cpp()
     from llama_cpp import Llama
 
-    model_path = resolve_model_path(model_filename)
-    mmproj_path = None
-    if mmproj_filename and mmproj_filename != "none":
-        mmproj_path = resolve_model_path(mmproj_filename)
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
 
     key = _cache_key(model_path, mmproj_path, n_ctx, n_gpu_layers)
     if key in _CACHE:
@@ -161,7 +122,7 @@ def get_llama(model_filename, mmproj_filename=None, n_ctx=8192,
 
     chat_handler = None
     if mmproj_path is not None:
-        chat_handler = _resolve_chat_handler(mmproj_path, verbose=verbose)
+        chat_handler = _resolve_chat_handler(mmproj_path, model_path, verbose=verbose)
 
     size_gb = os.path.getsize(model_path) / 1e9
     print(f"[LocalLLM] Loading {os.path.basename(model_path)} "
@@ -188,10 +149,9 @@ def get_llama(model_filename, mmproj_filename=None, n_ctx=8192,
             "  1. Incomplete download - re-verify the file size against "
             "the HuggingFace repo.\n"
             "  2. Your llama-cpp-python's native library is too old for "
-            "this model architecture (e.g. qwen3vl). Reinstall a current "
-            "build:\n"
-            '     CMAKE_ARGS="-DGGML_CUDA=on" pip install --no-cache-dir '
-            "--force-reinstall git+https://github.com/JamePeng/llama-cpp-python.git\n"
+            "this model architecture. Delete ComfyUI/models/LLM/.wheels, "
+            "restart ComfyUI and run again to auto-install a newer build "
+            "(or see README, Troubleshooting).\n"
             "  3. Not enough free (V)RAM - lower n_gpu_layers or close "
             "other models first."
         ) from e
@@ -326,13 +286,13 @@ def chat(llm, messages, max_tokens=512, temperature=0.7, top_p=0.9,
     return extract_final_answer(text).strip()
 
 
-def chat_with_recovery(model_filename, mmproj_filename, n_ctx, n_gpu_layers,
+def chat_with_recovery(model_path, mmproj_path, n_ctx, n_gpu_layers,
                        messages, **sampling):
     """chat() with automatic recovery: if the hybrid KV cache is exhausted
     ('Failed completely even with batch size 1'), unload, reload the model
     fresh and retry ONCE. Fixes intermittent cache-fragmentation failures
     on hybrid SSM models at the cost of one reload."""
-    llm = get_llama(model_filename, mmproj_filename=mmproj_filename,
+    llm = get_llama(model_path, mmproj_path=mmproj_path,
                     n_ctx=n_ctx, n_gpu_layers=n_gpu_layers)
     try:
         return chat(llm, messages, **sampling)
@@ -344,7 +304,7 @@ def chat_with_recovery(model_filename, mmproj_filename, n_ctx, n_gpu_layers,
         print("[LocalLLM] KV cache exhausted - reloading model and "
               "retrying once...")
         unload_all()
-        llm = get_llama(model_filename, mmproj_filename=mmproj_filename,
+        llm = get_llama(model_path, mmproj_path=mmproj_path,
                         n_ctx=n_ctx, n_gpu_layers=n_gpu_layers)
         return chat(llm, messages, **sampling)
 

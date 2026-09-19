@@ -1,6 +1,6 @@
 # Prompt Library
 
-Ready-to-use **system prompts** for the LocalLLM Prompt Generator / LocalVLM Image Caption nodes. Each file targets one MiniMax H3 generation mode. Paste the code block from a file into the node's `system_prompt` field.
+Ready-to-use **system prompts** for the LocalLLM Prompt Generator / LocalVLM Image Caption nodes. Each file targets one MiniMax H3 generation mode. Easiest way to use them: add a **LocalLLM System Prompt (Library)** node, pick the template in its dropdown and connect its output to the `system_prompt_input` socket of the Prompt Generator / Image Caption node. (Pasting the code block into the node's `system_prompt` field still works, too.) Any `.md` file you add to this folder appears in the dropdown after pressing `R` in ComfyUI - the first fenced code block is used as the prompt, the first `# heading` as its name.
 
 ## ⚠️ Dialogue language: German (video prompts only)
 

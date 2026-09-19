@@ -1,4 +1,9 @@
 __pycache__/
 *.pyc
 *.gguf
+*.whl
 .DS_Store
+# user-specific model additions (keep the .example in git)
+custom_models.json
+# only when running outside ComfyUI
+models/

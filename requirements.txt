@@ -1,8 +1,9 @@
-# llama-cpp-python is intentionally NOT listed here.
+# Intentionally (almost) empty.
 #
-# Installing it via plain `pip install llama-cpp-python` gives you a
-# CPU-only build. For GPU inference you must install a CUDA build
-# yourself - see README.md ("Installing llama-cpp-python").
+# llama-cpp-python is NOT listed here on purpose: a plain
+# `pip install llama-cpp-python` produces a CPU-only build. The node pack
+# installs a matching CUDA build by itself on first use (see
+# llama_bootstrap.py) or via install.py when installed through
+# ComfyUI-Manager.
 #
-# Everything else this node pack needs (numpy, Pillow, torch) already
-# ships with ComfyUI.
+# numpy, Pillow and torch already ship with ComfyUI.

@@ -1,0 +1,23 @@
+{
+  "_comment": "Copy this file to custom_models.json and edit it. Every family listed here appears in the model dropdown exactly like the built-in ones and is downloaded automatically on first use. 'mmproj' is optional (only for vision models). size_gb is only used for the dropdown label and the VRAM check - a rough value is fine.",
+  "families": [
+    {
+      "id": "my-custom-model",
+      "label": "My Custom Model 8B",
+      "vision": false,
+      "quants": [
+        {"quant": "Q4_K_M", "size_gb": 4.9, "repo": "someuser/Some-Model-8B-GGUF", "filename": "Some-Model-8B-Q4_K_M.gguf"},
+        {"quant": "Q8_0",   "size_gb": 8.7, "repo": "someuser/Some-Model-8B-GGUF", "filename": "Some-Model-8B-Q8_0.gguf"}
+      ]
+    },
+    {
+      "id": "my-vision-model",
+      "label": "My Vision Model 7B",
+      "vision": true,
+      "mmproj": {"repo": "someuser/Some-VL-7B-GGUF", "filename": "mmproj-Some-VL-7B-f16.gguf", "size_gb": 0.9},
+      "quants": [
+        {"quant": "Q4_K_M", "size_gb": 4.7, "repo": "someuser/Some-VL-7B-GGUF", "filename": "Some-VL-7B-Q4_K_M.gguf"}
+      ]
+    }
+  ]
+}
