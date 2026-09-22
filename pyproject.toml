@@ -1,13 +1,16 @@
 [project]
-name = "comfyui-localllm-nodes"
-description = "Local GGUF LLM/VLM nodes for ComfyUI (llama.cpp): prompt generation, image captioning, prompt library, model catalog with auto-download and self-installing CUDA backend."
-version = "2.0.0"
-license = { text = "MIT" }
+name = "slarti-llm-nodes"
+description = "Local GGUF LLM/VLM nodes for ComfyUI (llama.cpp): prompt generation, image captioning and VRAM management, with automatic GPU setup for llama-cpp-python and a prompt library for Krea2/FLUX2 images and MiniMax H3 video."
+version = "2.0.1"
+license = { file = "LICENSE" }
+# llama-cpp-python is intentionally NOT listed here: a plain pip install gives a
+# CPU-only build. The GPU build is installed automatically by llama_bootstrap.py.
 dependencies = []
 
 [project.urls]
-Repository = "https://github.com/Slartibart23/ComfyUI-LocalLLM-Nodes-v1.2.0"
+Repository = "https://github.com/Slartibart23/ComfyUI-Slarti-LLM-Nodes"
+"Bug Tracker" = "https://github.com/Slartibart23/ComfyUI-Slarti-LLM-Nodes/issues"
 
 [tool.comfy]
-PublisherId = "slartibart23"
-DisplayName = "ComfyUI-LocalLLM-Nodes"
+PublisherId = "slartibart23b"
+DisplayName = "Slarti LLM Nodes (GGUF)"

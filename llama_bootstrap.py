@@ -79,12 +79,75 @@ def wheel_cache_dir():
 # Status check
 # ---------------------------------------------------------------------------
 
+_BACKENDS_LOADED = False
+
+
+def _copy_cuda_runtime_from_torch(lib_dir):
+    """Windows CUDA wheels of llama-cpp-python may ship ggml-cuda.dll without
+    the CUDA runtime DLLs it depends on (cudart, cublas, cublasLt). If they
+    cannot be found, ggml silently falls back to CPU. PyTorch CUDA builds
+    bundle exactly these DLLs in torch/lib, so copy missing or outdated ones
+    next to ggml-cuda.dll. Copying new files works even while ComfyUI runs."""
+    if not os.path.isfile(os.path.join(lib_dir, "ggml-cuda.dll")):
+        return
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec("torch")
+        if not spec or not spec.origin:
+            return
+        torch_lib = os.path.join(os.path.dirname(spec.origin), "lib")
+    except Exception:
+        return
+    import shutil
+    for pattern in ("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll"):
+        for src in glob.glob(os.path.join(torch_lib, pattern)):
+            dst = os.path.join(lib_dir, os.path.basename(src))
+            try:
+                if os.path.isfile(dst) and os.path.getsize(dst) == os.path.getsize(src):
+                    continue
+                shutil.copy2(src, dst)
+                print(f"[LocalLLM] Copied CUDA runtime {os.path.basename(src)} from torch/lib")
+            except Exception as e:
+                print(f"[LocalLLM] Could not copy {os.path.basename(src)}: {e}")
+
+
+def _load_ggml_backends(llama_cpp):
+    """PATCH: Newer llama.cpp builds load their compute backends (CPU/CUDA)
+    lazily as separate DLLs. Right after import no device is registered yet,
+    so llama_supports_gpu_offload() wrongly reports False. Load the backends
+    from llama_cpp/lib once, but only if none are registered yet."""
+    global _BACKENDS_LOADED
+    if _BACKENDS_LOADED:
+        return
+    _BACKENDS_LOADED = True
+    try:
+        import ctypes
+        lib_dir = os.path.join(os.path.dirname(llama_cpp.__file__), "lib")
+        name = {"windows": "ggml.dll", "darwin": "libggml.dylib"}.get(
+            platform.system().lower(), "libggml.so")
+        ggml_path = os.path.join(lib_dir, name)
+        if not os.path.isfile(ggml_path):
+            return
+        if platform.system().lower() == "windows":
+            _copy_cuda_runtime_from_torch(lib_dir)
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(lib_dir)
+        g = ctypes.CDLL(ggml_path)
+        g.ggml_backend_dev_count.restype = ctypes.c_size_t
+        if g.ggml_backend_dev_count() == 0:
+            g.ggml_backend_load_all_from_path.argtypes = [ctypes.c_char_p]
+            g.ggml_backend_load_all_from_path(lib_dir.encode())
+    except Exception as e:
+        print(f"[LocalLLM] Backend preload skipped: {e}")
+
+
 def _gpu_build_present():
     """(importable, gpu_offload) for the currently installed llama_cpp."""
     try:
         import llama_cpp
     except Exception:
         return False, False
+    _load_ggml_backends(llama_cpp)
     try:
         gpu = bool(llama_cpp.llama_supports_gpu_offload())
     except Exception:
@@ -105,7 +168,7 @@ def _pip(args, env=None):
 
 def _github_json(url):
     req = urllib.request.Request(url, headers={
-        "User-Agent": "ComfyUI-LocalLLM-Nodes",
+        "User-Agent": "ComfyUI-Slarti-LLM-Nodes",
         "Accept": "application/vnd.github+json"})
     tok = os.environ.get("GITHUB_TOKEN")
     if tok:
@@ -168,7 +231,7 @@ def _ts(iso):
 
 def _download(url, dest):
     print(f"[LocalLLM] Downloading wheel {os.path.basename(dest)} ...")
-    req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-LocalLLM-Nodes"})
+    req = urllib.request.Request(url, headers={"User-Agent": "ComfyUI-Slarti-LLM-Nodes"})
     tmp = dest + ".part"
     with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as fh:
         total = r.headers.get("Content-Length")

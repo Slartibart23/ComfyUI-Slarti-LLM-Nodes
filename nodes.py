@@ -1,5 +1,5 @@
 """
-ComfyUI-LocalLLM-Nodes
+ComfyUI-Slarti-LLM-Nodes
 
   1. LocalLLM Prompt Generator     - text -> text (SD/Flux/video prompt writing)
   2. LocalVLM Image Caption        - image(+prompt) -> text (captioning)

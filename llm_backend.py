@@ -1,5 +1,5 @@
 """
-Shared llama-cpp-python backend for ComfyUI-LocalLLM-Nodes.
+Shared llama-cpp-python backend for ComfyUI-Slarti-LLM-Nodes.
 
 Handles:
   - Loading / caching of Llama instances (text-only and vision)

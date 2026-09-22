@@ -1,5 +1,5 @@
 """
-Model catalog and auto-download for ComfyUI-LocalLLM-Nodes.
+Model catalog and auto-download for ComfyUI-Slarti-LLM-Nodes.
 
 - Reads models.json (built-in) and custom_models.json (user) next to this file.
 - Builds the dropdown entries shown in the nodes. Every entry carries its
@@ -308,7 +308,7 @@ def hf_url(repo, filename):
 
 
 def _headers(resume_from=0):
-    h = {"User-Agent": "ComfyUI-LocalLLM-Nodes"}
+    h = {"User-Agent": "ComfyUI-Slarti-LLM-Nodes"}
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if token:
         h["Authorization"] = f"Bearer {token}"
